@@ -64,7 +64,7 @@ def get_clean_ffhq_dataloaders(image_dir, train_ratio=0.8, batch_size=64, seed=1
         train_dataset, 
         batch_size=batch_size, 
         shuffle=True, 
-        num_workers=4,  # Reduced from 8
+        num_workers=8,  # Reduced from 8
         pin_memory=True,
         drop_last=True  # Ensures consistent batch sizes
     )
@@ -119,7 +119,7 @@ def get_clean_ffhq_dataloaders_unnormalized(image_dir, train_ratio=0.8, batch_si
         train_dataset, 
         batch_size=batch_size, 
         shuffle=True, 
-        num_workers=4,
+        num_workers=8,
         pin_memory=True,
         drop_last=True
     )

@@ -1,27 +1,31 @@
 import torch
 from torchvision import transforms
-from skimage.metrics import peak_signal_noise_ratio, structural_similarity
+from skimage.metrics import peak_signal_noise_ratio
+from skimage.metrics import structural_similarity as ssim
 import lpips
 import numpy as np
+from eval import *
 import torchvision.utils as vutils
 from PIL import Image
 import os
 
 # Initialize LPIPS model
-lpips_model = lpips.LPIPS(net='alex').cuda()
-
+lpips_model = lpips.LPIPS(net='alex').to("cuda").eval()
 def compute_metrics(gt_img, pred_img):
+    # Convert to numpy (H, W, C) for SSIM & PSNR
     gt = gt_img.permute(1, 2, 0).cpu().numpy()
     pred = pred_img.permute(1, 2, 0).cpu().numpy()
 
+    # Compute PSNR and SSIM (for color image)
     psnr = peak_signal_noise_ratio(gt, pred, data_range=1.0)
-    ssim = structural_similarity(gt, pred, multichannel=True, data_range=1.0)
+    ssim_score, _ = ssim(gt, pred, channel_axis=-1, data_range=1.0, full=True)
 
+    # Convert to [-1, 1] for LPIPS
     gt_lpips = 2 * gt_img - 1
     pred_lpips = 2 * pred_img - 1
     lpips_score = lpips_model(gt_lpips.cuda().unsqueeze(0), pred_lpips.cuda().unsqueeze(0)).item()
 
-    return {'psnr': psnr, 'ssim': ssim, 'lpips': lpips_score}
+    return {'psnr': psnr, 'ssim': ssim_score, 'lpips': lpips_score}
 
 def save_visual_comparison(gt, noisy, recon, path):
     grid = vutils.make_grid(torch.cat([gt, noisy, recon], dim=0), nrow=3)

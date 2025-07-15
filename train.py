@@ -1,4 +1,5 @@
 import random
+import wandb
 from src.data import get_clean_ffhq_dataloaders, get_clean_ffhq_dataloaders_unnormalized
 import json
 import torch
@@ -7,6 +8,7 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
+from eval import compute_metrics
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -172,21 +174,23 @@ class MAE(nn.Module):
 
         return pred, mask
 
+        # Recommended loss function
     def loss(self, pred, target, mask):
+        """
+        Computes the Mean Squared Error on the masked patches.
+        pred: [B, N, patch_size**2 * 3]
+        target: [B, 3, H, W]
+        mask: [B, N], 0 for visible, 1 for masked
+        """
         target_patches = patchify(target, self.patch_size)
         
-        # Normalize patches to improve training stability
-        target_mean = target_patches.mean(dim=-1, keepdim=True)
-        target_std = target_patches.std(dim=-1, keepdim=True) + 1e-6
-        target_norm = (target_patches - target_mean) / target_std
+        # Calculate MSE loss
+        loss = (pred - target_patches) ** 2
+        loss = loss.mean(dim=-1)  # Loss per patch
         
-        pred_mean = pred.mean(dim=-1, keepdim=True)
-        pred_std = pred.std(dim=-1, keepdim=True) + 1e-6
-        pred_norm = (pred - pred_mean) / pred_std
-        
-        loss = (pred_norm - target_norm) ** 2
-        loss = loss.mean(dim=-1)
+        # Only keep the loss on masked patches
         loss = (loss * mask).sum() / mask.sum()
+        
         return loss
 
     def reconstruct(self, pred):
@@ -196,16 +200,42 @@ class MAE(nn.Module):
 def validate(model, dataloader, device):
     model.eval()
     total_loss = 0
+    all_metrics = {'psnr': [], 'ssim': [], 'lpips': []}
+
     with torch.no_grad():
         for imgs in dataloader:
             imgs = imgs.to(device)
-            pred, mask = model(imgs)
-            loss = model.loss(pred, imgs, mask)
+            
+            # Get model predictions
+            pred_patches, mask = model(imgs)
+            loss = model.loss(pred_patches, imgs, mask)
             total_loss += loss.item()
-    return total_loss / len(dataloader)
+            
+            # Reconstruct images from patches
+            reconstructed_imgs = model.reconstruct(pred_patches)
+            
+            # Clamp values to [0, 1] range for metric calculation
+            reconstructed_imgs = torch.clamp(reconstructed_imgs, 0, 1)
+
+            # --- Compute metrics for each image in the batch ---
+            for i in range(imgs.shape[0]):
+                gt_img = imgs[i]
+                pred_img = reconstructed_imgs[i]
+                
+                # Use your existing function to get metrics for one image
+                metrics = compute_metrics(gt_img, pred_img)
+                
+                # Store the results
+                for key in all_metrics:
+                    all_metrics[key].append(metrics[key])
+
+    # Calculate the average of all collected metrics
+    avg_metrics = {key: np.mean(values) for key, values in all_metrics.items()}
+    
+    return total_loss / len(dataloader), avg_metrics
 
 
-def train_one_epoch(model, dataloader, optimizer, device, epoch, verbose=True):
+def train_one_epoch(model, dataloader, optimizer, device, epoch, global_step, verbose=True):
     model.train()
     total_loss = 0
     num_batches = len(dataloader)
@@ -228,6 +258,9 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, verbose=True):
         
         batch_loss = loss.item()
         total_loss += batch_loss
+        wandb.log({"train_batch_loss": batch_loss})
+        global_step +=1
+
         
         # Print detailed info for first few batches
         if batch_idx < 3 or batch_idx % 20 == 0:
@@ -240,11 +273,11 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, verbose=True):
             
         # Save reconstruction sample for first batch of first epoch
         if batch_idx == 0:
-            save_reconstruction_sample(model, imgs, pred, mask, f"/home/hice1/avarma49/scratch/reconstruction/reconstruction_epoch_{epoch}.png")
+            save_reconstruction_sample(model, imgs, pred, mask, f"/home/hice1/avarma49/scratch/reconstruction/reconstruction_epoch_{epoch}.png", epoch + 1)
     
     return total_loss / num_batches
 
-def save_reconstruction_sample(model, imgs, pred, mask, filename):
+def save_reconstruction_sample(model, imgs, pred, mask, filename, epoch):
     model.eval()
     with torch.no_grad():
         img = imgs[0:1]
@@ -301,6 +334,8 @@ def save_reconstruction_sample(model, imgs, pred, mask, filename):
         plt.tight_layout()
         plt.savefig(filename, dpi=150, bbox_inches='tight')
         plt.close()
+
+        wandb.log({"Reconstruction Example": wandb.Image(filename, caption=f"Epoch {epoch}")})
         
         print(f"Saved reconstruction sample to {filename}")
         print(f"Patch grid: {patches_per_side}x{patches_per_side}, Patch size: {patch_size}x{patch_size}")
@@ -308,37 +343,67 @@ def save_reconstruction_sample(model, imgs, pred, mask, filename):
 # Training setup with debugging
 # Training setup with debugging
 def main(resume_from_checkpoint=None):
-    # Smaller model for debugging
-    total_epochs = 500
+    global_step = 0
+    config = {
+        "epochs": 500,
+        "batch_size": 256, # Or whatever you decide on
+        "lr": 1e-4,
+        "weight_decay": 0.05,
+        "img_size": 256,
+        "patch_size": 16,
+        "encoder_dim": 1024,
+        "decoder_dim": 512,
+        "encoder_depth": 16,
+        "decoder_depth": 8,
+        "encoder_heads": 16,
+        "decoder_heads": 8,
+        "mask_ratio": 0.75
+    }
+    wandb.init(
+        project="mae-ffhq-reconstruction",  # A name for your project
+        config=config                      # The hyperparameter configuration
+    )
+
+
+    total_epochs = wandb.config.epochs
+
     model = MAE(
-        img_size=256,
-        patch_size=16,
-        encoder_dim=1024,  # Much smaller
-        decoder_dim=512,
-        encoder_depth=16,
-        decoder_depth=8,
-        encoder_heads=16,
-        decoder_heads=8,
-        mask_ratio=0.6
+        img_size=wandb.config.img_size,
+        patch_size=wandb.config.patch_size,
+        encoder_dim=wandb.config.encoder_dim,  # Much smaller
+        decoder_dim=wandb.config.decoder_dim,
+        encoder_depth=wandb.config.encoder_depth,
+        decoder_depth=wandb.config.decoder_depth,
+        encoder_heads=wandb.config.encoder_heads,
+        decoder_heads=wandb.config.decoder_heads,
+        mask_ratio=wandb.config.mask_ratio,
     )
 
     # Load your data
     train_loader, test_loader = get_clean_ffhq_dataloaders_unnormalized(
         "/home/hice1/avarma49/scratch/ffhq-256/",
-        batch_size=32  # Smaller batch size
+        batch_size=wandb.config.batch_size  # Smaller batch size
     )
 
-    optimizer = AdamW(model.parameters(), lr=5e-4, weight_decay=0.05)
+    optimizer = AdamW(model.parameters(), lr=wandb.config.lr, weight_decay=wandb.config.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_epochs)
 
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
+    wandb.watch(model, log="gradients", log_freq=100) # log_freq logs every 100 batches
+
 
     # Resume from checkpoint if provided
     start_epoch = 0
-    losses = []
-    val_losses = []
+    history = {
+        'train_loss': [],
+        'val_loss': [],
+        'psnr': [],
+        'ssim': [],
+        'lpips': []
+    }
+
 
     if resume_from_checkpoint:
         print(f"Resuming from checkpoint: {resume_from_checkpoint}")
@@ -362,24 +427,40 @@ def main(resume_from_checkpoint=None):
 
     epochs_to_run = total_epochs - start_epoch
 
+    # warmup_epochs = 10 # A 10-epoch warmup is a safe choice
     for epoch in range(start_epoch, total_epochs):
         print(f"\nEpoch {epoch + 1}/{total_epochs}")
         print(f"Learning rate: {optimizer.param_groups[0]['lr']:.2e}")
 
-        loss = train_one_epoch(model, train_loader, optimizer, device, epoch, verbose=True)
+        train_loss = train_one_epoch(model, train_loader, optimizer, device, epoch, global_step, verbose=True)
 
-        val_loss = validate(model, test_loader, device)
+        val_loss, val_metrics = validate(model, test_loader, device)
 
         scheduler.step()
 
-        print(f"Epoch {epoch + 1} - Train Loss: {loss:.4f}, Val Loss: {val_loss:.4f}")
+        print(f"Epoch {epoch + 1} - Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+        print(f"  Metrics - PSNR: {val_metrics['psnr']:.2f}, SSIM: {val_metrics['ssim']:.4f}, LPIPS: {val_metrics['lpips']:.4f}")
 
-        losses.append(loss)
-        val_losses.append(val_loss)
+        wandb.log({
+            "epoch": epoch + 1,
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "psnr": val_metrics['psnr'],
+            "ssim": val_metrics['ssim'],
+            "lpips": val_metrics['lpips'],
+            "learning_rate": optimizer.param_groups[0]['lr']
+        })
+
+        history['train_loss'].append(float(train_loss))
+        history['val_loss'].append(float(val_loss))
+        history['psnr'].append(float(val_metrics['psnr']))
+        history['ssim'].append(float(val_metrics['ssim']))
+        history['lpips'].append(float(val_metrics['lpips']))
+
 
         # Save progress
-        with open("debug_losses.json", "w") as f:
-            json.dump({"train": losses, "val": val_losses}, f, indent=2)
+        with open("metrics_history.json", "w") as f:
+            json.dump(history, f, indent=2)
 
         # Save checkpoint every 5 epochs
         if (epoch + 1) % 5 == 0:
@@ -389,6 +470,8 @@ def main(resume_from_checkpoint=None):
                 'optimizer_state_dict': optimizer.state_dict(),
                 'loss': loss,
             }, f"/home/hice1/avarma49/scratch/checkpoints/debug_checkpoint_epoch_{epoch + 1}.pt")
+
+    wandb.finish()
 
     return model, losses
 
