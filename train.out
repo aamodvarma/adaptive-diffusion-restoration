@@ -1,20 +1,198 @@
 /home/hice1/avarma49/adaptive-diffusion-restoration/.venv/lib64/python3.9/site-packages/networkx/utils/backends.py:135: RuntimeWarning: networkx backend defined more than once: nx-loopback
   backends.update(_get_backends("networkx.backends"))
+/home/hice1/avarma49/adaptive-diffusion-restoration/.venv/lib64/python3.9/site-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/home/hice1/avarma49/adaptive-diffusion-restoration/.venv/lib64/python3.9/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=AlexNet_Weights.IMAGENET1K_V1`. You can also use `weights=AlexNet_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
 wandb: Currently logged in as: aamodvarma to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
 wandb: Tracking run with wandb version 0.21.0
-wandb: Run data is saved locally in /home/hice1/avarma49/adaptive-diffusion-restoration/wandb/run-20250714_225003-65wz56u9
+wandb: Run data is saved locally in /home/hice1/avarma49/adaptive-diffusion-restoration/wandb/run-20250715_180059-8ncniu2f
 wandb: Run `wandb offline` to turn off syncing.
-wandb: Syncing run cool-cherry-3
+wandb: Syncing run dandy-monkey-16
 wandb: ⭐️ View project at https://wandb.ai/aamodvarma/mae-ffhq-reconstruction
-wandb: 🚀 View run at https://wandb.ai/aamodvarma/mae-ffhq-reconstruction/runs/65wz56u9
+wandb: 🚀 View run at https://wandb.ai/aamodvarma/mae-ffhq-reconstruction/runs/8ncniu2f
+Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
+Loading model from: /home/hice1/avarma49/adaptive-diffusion-restoration/.venv/lib64/python3.9/site-packages/lpips/weights/v0.1/alex.pth
 MAE Config: img_size=256, patch_size=16, num_patches=256
 Encoder: dim=1024, depth=16, heads=16
 Decoder: dim=512, depth=8, heads=8
-Mask ratio: 0.6
+Mask ratio: 0.75
 Training samples: 56000
 Test samples: 14000
 Model parameters: 228.86M
 Training on cuda
 
 Epoch 1/500
-Learning rate: 5.00e-04
+Learning rate: 1.00e-06
+  Batch 1/218
+    Loss: 0.9969
+    Grad norm: 26.3563
+    Mask ratio actual: 0.750
+    Pred range: [-2.892, 3.272]
+    Target range: [0.000, 1.000]
+Saved reconstruction sample to /home/hice1/avarma49/scratch/reconstruction/reconstruction_epoch_0.png
+Patch grid: 16x16, Patch size: 16x16
+Masked patches: 192.0/256 (75.0%)
+  Batch 2/218
+    Loss: 0.9150
+    Grad norm: 19.6150
+    Mask ratio actual: 0.750
+    Pred range: [-2.773, 3.212]
+    Target range: [0.000, 1.000]
+  Batch 3/218
+    Loss: 0.8310
+    Grad norm: 13.8601
+    Mask ratio actual: 0.750
+    Pred range: [-2.747, 3.106]
+    Target range: [0.000, 1.000]
+  Batch 21/218
+    Loss: 0.5320
+    Grad norm: 3.7749
+    Mask ratio actual: 0.750
+    Pred range: [-2.142, 2.195]
+    Target range: [0.000, 1.000]
+  Batch 41/218
+    Loss: 0.3788
+    Grad norm: 2.3895
+    Mask ratio actual: 0.750
+    Pred range: [-2.221, 2.300]
+    Target range: [0.000, 1.000]
+  Batch 61/218
+    Loss: 0.3033
+    Grad norm: 2.4149
+    Mask ratio actual: 0.750
+    Pred range: [-2.087, 2.221]
+    Target range: [0.000, 1.000]
+  Batch 81/218
+    Loss: 0.2610
+    Grad norm: 4.1524
+    Mask ratio actual: 0.750
+    Pred range: [-2.190, 2.253]
+    Target range: [0.000, 1.000]
+  Batch 101/218
+    Loss: 0.2345
+    Grad norm: 4.1807
+    Mask ratio actual: 0.750
+    Pred range: [-2.238, 2.407]
+    Target range: [0.000, 1.000]
+  Batch 121/218
+    Loss: 0.2115
+    Grad norm: 4.0340
+    Mask ratio actual: 0.750
+    Pred range: [-2.439, 2.872]
+    Target range: [0.000, 1.000]
+  Batch 141/218
+    Loss: 0.1900
+    Grad norm: 2.8637
+    Mask ratio actual: 0.750
+    Pred range: [-2.480, 2.746]
+    Target range: [0.000, 1.000]
+  Batch 161/218
+    Loss: 0.1788
+    Grad norm: 2.8763
+    Mask ratio actual: 0.750
+    Pred range: [-2.570, 2.817]
+    Target range: [0.000, 1.000]
+  Batch 181/218
+    Loss: 0.1673
+    Grad norm: 4.5473
+    Mask ratio actual: 0.750
+    Pred range: [-2.598, 2.908]
+    Target range: [0.000, 1.000]
+  Batch 201/218
+    Loss: 0.1616
+    Grad norm: 4.7427
+    Mask ratio actual: 0.750
+    Pred range: [-2.640, 2.835]
+    Target range: [0.000, 1.000]
+Epoch 1 - Train Loss: 0.2843, Val Loss: 0.1568
+  Metrics - PSNR: 7.98, SSIM: 0.0097, LPIPS: 1.4575
+
+Epoch 2/500
+Learning rate: 1.09e-05
+  Batch 1/218
+    Loss: 0.1608
+    Grad norm: 3.4164
+    Mask ratio actual: 0.750
+    Pred range: [-2.563, 2.787]
+    Target range: [0.000, 1.000]
+Saved reconstruction sample to /home/hice1/avarma49/scratch/reconstruction/reconstruction_epoch_1.png
+Patch grid: 16x16, Patch size: 16x16
+Masked patches: 192.0/256 (75.0%)
+  Batch 2/218
+    Loss: 0.3672
+    Grad norm: 38.8604
+    Mask ratio actual: 0.750
+    Pred range: [-2.394, 2.397]
+    Target range: [0.000, 1.000]
+  Batch 3/218
+    Loss: 0.3225
+    Grad norm: 32.6612
+    Mask ratio actual: 0.750
+    Pred range: [-2.439, 2.460]
+    Target range: [0.000, 1.000]
+  Batch 21/218
+    Loss: 0.1419
+    Grad norm: 4.3099
+    Mask ratio actual: 0.750
+    Pred range: [-2.185, 2.128]
+    Target range: [0.000, 1.000]
+  Batch 41/218
+    Loss: 0.1059
+    Grad norm: 2.2765
+    Mask ratio actual: 0.750
+    Pred range: [-1.976, 2.178]
+    Target range: [0.000, 1.000]
+  Batch 61/218
+    Loss: 0.0841
+    Grad norm: 0.8427
+    Mask ratio actual: 0.750
+    Pred range: [-1.668, 2.068]
+    Target range: [0.000, 1.000]
+  Batch 81/218
+    Loss: 0.0708
+    Grad norm: 0.4588
+    Mask ratio actual: 0.750
+    Pred range: [-1.512, 2.067]
+    Target range: [0.000, 1.000]
+  Batch 101/218
+    Loss: 0.0690
+    Grad norm: 0.4060
+    Mask ratio actual: 0.750
+    Pred range: [-1.511, 2.030]
+    Target range: [0.000, 1.000]
+  Batch 121/218
+    Loss: 0.0675
+    Grad norm: 0.2154
+    Mask ratio actual: 0.750
+    Pred range: [-1.521, 1.939]
+    Target range: [0.000, 1.000]
+  Batch 141/218
+    Loss: 0.0664
+    Grad norm: 0.1292
+    Mask ratio actual: 0.750
+    Pred range: [-1.496, 1.944]
+    Target range: [0.000, 1.000]
+  Batch 161/218
+    Loss: 0.0676
+    Grad norm: 0.6364
+    Mask ratio actual: 0.750
+    Pred range: [-1.552, 1.989]
+    Target range: [0.000, 1.000]
+  Batch 181/218
+    Loss: 0.0673
+    Grad norm: 0.5870
+    Mask ratio actual: 0.750
+    Pred range: [-1.546, 1.986]
+    Target range: [0.000, 1.000]
+  Batch 201/218
+    Loss: 0.0670
+    Grad norm: 0.3987
+    Mask ratio actual: 0.750
+    Pred range: [-1.572, 2.014]
+    Target range: [0.000, 1.000]
+Epoch 2 - Train Loss: 0.0879, Val Loss: 0.0655
+  Metrics - PSNR: 10.19, SSIM: 0.0936, LPIPS: 0.9464
+
+Epoch 3/500
+Learning rate: 2.08e-05

@@ -1,4 +1,5 @@
 import random
+from torch.optim.lr_scheduler import LinearLR, SequentialLR
 import wandb
 from src.data import get_clean_ffhq_dataloaders, get_clean_ffhq_dataloaders_unnormalized
 import json
@@ -77,7 +78,8 @@ class MAE(nn.Module):
         self.decoder_pos_embed = nn.Parameter(torch.randn(1, self.num_patches, decoder_dim) * 0.02)
 
         # Mask token
-        self.mask_token = nn.Parameter(torch.randn(1, 1, decoder_dim) * 0.02)
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_dim))
+
 
         # Simpler Encoder - using basic transformer layers
         encoder_layer = nn.TransformerEncoderLayer(
@@ -105,7 +107,10 @@ class MAE(nn.Module):
         )
         self.decoder_blocks = nn.TransformerEncoder(decoder_layer, decoder_depth)
         self.decoder_norm = nn.LayerNorm(decoder_dim)
-        self.head = nn.Linear(decoder_dim, patch_size**2 * 3)
+        self.head = nn.Sequential(
+            nn.Linear(decoder_dim, patch_size**2 * 3),
+            nn.Sigmoid()          # clamp to [0, 1]
+        )
 
         # Initialize weights properly
         self.apply(self._init_weights)
@@ -189,7 +194,8 @@ class MAE(nn.Module):
         loss = loss.mean(dim=-1)  # Loss per patch
         
         # Only keep the loss on masked patches
-        loss = (loss * mask).sum() / mask.sum()
+        loss = (loss * mask).sum() / (mask.sum() + 1e-8)
+
         
         return loss
 
@@ -266,10 +272,10 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, global_step, ve
         if batch_idx < 3 or batch_idx % 20 == 0:
             print(f"  Batch {batch_idx + 1}/{num_batches}")
             print(f"    Loss: {batch_loss:.4f}")
-            # print(f"    Grad norm: {total_norm:.4f}")
-            # print(f"    Mask ratio actual: {mask.mean().item():.3f}")
-            # print(f"    Pred range: [{pred.min().item():.3f}, {pred.max().item():.3f}]")
-            # print(f"    Target range: [{imgs.min().item():.3f}, {imgs.max().item():.3f}]")
+            print(f"    Grad norm: {total_norm:.4f}")
+            print(f"    Mask ratio actual: {mask.mean().item():.3f}")
+            print(f"    Pred range: [{pred.min().item():.3f}, {pred.max().item():.3f}]")
+            print(f"    Target range: [{imgs.min().item():.3f}, {imgs.max().item():.3f}]")
             
         # Save reconstruction sample for first batch of first epoch
         if batch_idx == 0:
@@ -345,8 +351,8 @@ def save_reconstruction_sample(model, imgs, pred, mask, filename, epoch):
 def main(resume_from_checkpoint=None):
     global_step = 0
     config = {
-        "epochs": 500,
-        "batch_size": 256, # Or whatever you decide on
+        "epochs": 100,
+        "batch_size": 512, # Or whatever you decide on
         "lr": 1e-4,
         "weight_decay": 0.05,
         "img_size": 256,
@@ -386,7 +392,11 @@ def main(resume_from_checkpoint=None):
     )
 
     optimizer = AdamW(model.parameters(), lr=wandb.config.lr, weight_decay=wandb.config.weight_decay)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_epochs)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_epochs)
+    warmup = LinearLR(optimizer, start_factor=0.01, total_iters=10)
+    cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_epochs-10)
+    scheduler = SequentialLR(optimizer, schedulers=[warmup, cosine], milestones=[10])
+
 
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
