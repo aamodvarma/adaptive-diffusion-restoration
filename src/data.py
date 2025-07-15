@@ -25,7 +25,7 @@ class CleanFFHQDataset(Dataset):
             print(f"Error loading image {img_path}: {e}")
             return self.__getitem__(random.randint(0, len(self.filenames) - 1))
 
-def get_clean_ffhq_dataloaders(image_dir, train_ratio=0.8, batch_size=64, seed=123):
+def get_clean_ffhq_dataloaders(image_dir, train_ratio=0.8, batch_size=64, seed=123, img_size=256):
     '''
     Splits clean FFHQ images into train/test and returns dataloaders (no masking applied).
     '''
@@ -42,7 +42,7 @@ def get_clean_ffhq_dataloaders(image_dir, train_ratio=0.8, batch_size=64, seed=1
     
     # Training transform with augmentation
     train_transform = transforms.Compose([
-        transforms.Resize((128, 128)),
+        transforms.Resize((256, 256)),
         transforms.RandomHorizontalFlip(p=0.5),  # Data augmentation
         transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05),  # Color augmentation
         transforms.ToTensor(),
@@ -51,7 +51,7 @@ def get_clean_ffhq_dataloaders(image_dir, train_ratio=0.8, batch_size=64, seed=1
     
     # Test transform without augmentation
     test_transform = transforms.Compose([
-        transforms.Resize((128, 128)),
+        transforms.Resize((256, 256)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
@@ -73,7 +73,7 @@ def get_clean_ffhq_dataloaders(image_dir, train_ratio=0.8, batch_size=64, seed=1
         test_dataset, 
         batch_size=batch_size, 
         shuffle=False, 
-        num_workers=2,
+        num_workers=4,
         pin_memory=True
     )
     
@@ -101,14 +101,14 @@ def get_clean_ffhq_dataloaders_unnormalized(image_dir, train_ratio=0.8, batch_si
     
     # Training transform with light augmentation
     train_transform = transforms.Compose([
-        transforms.Resize((128, 128)),
+        transforms.Resize((256, 256)),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.ToTensor(),  # Values in [0, 1]
     ])
     
     # Test transform
     test_transform = transforms.Compose([
-        transforms.Resize((128, 128)),
+        transforms.Resize((256, 256)),
         transforms.ToTensor(),
     ])
     
@@ -128,7 +128,7 @@ def get_clean_ffhq_dataloaders_unnormalized(image_dir, train_ratio=0.8, batch_si
         test_dataset, 
         batch_size=batch_size, 
         shuffle=False, 
-        num_workers=2,
+        num_workers=4,
         pin_memory=True
     )
     

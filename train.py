@@ -1,4 +1,5 @@
 import random
+from src.data import get_clean_ffhq_dataloaders, get_clean_ffhq_dataloaders_unnormalized
 import json
 import torch
 import torch.nn as nn
@@ -52,7 +53,8 @@ class MAE(nn.Module):
         decoder_dim=256,  # Reduced from 768
         encoder_depth=6,  # Reduced from 16
         decoder_depth=4,  # Reduced from 12
-        num_heads=8,      # Reduced from 16
+        encoder_heads=16,      # Reduced from 16
+        decoder_heads=8,      # Reduced from 16
         mask_ratio=0.75,
     ):
         super().__init__()
@@ -62,8 +64,8 @@ class MAE(nn.Module):
         self.num_patches = (img_size // patch_size) ** 2
         
         print(f"MAE Config: img_size={img_size}, patch_size={patch_size}, num_patches={self.num_patches}")
-        print(f"Encoder: dim={encoder_dim}, depth={encoder_depth}, heads={num_heads}")
-        print(f"Decoder: dim={decoder_dim}, depth={decoder_depth}")
+        print(f"Encoder: dim={encoder_dim}, depth={encoder_depth}, heads={encoder_heads}")
+        print(f"Decoder: dim={decoder_dim}, depth={decoder_depth}, heads={decoder_heads}")
         print(f"Mask ratio: {mask_ratio}")
         
         self.patch_embed = PatchEmbed(img_size, patch_size, 3, encoder_dim)
@@ -78,7 +80,7 @@ class MAE(nn.Module):
         # Simpler Encoder - using basic transformer layers
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=encoder_dim,
-            nhead=num_heads,
+            nhead=encoder_heads,
             dim_feedforward=encoder_dim * 4,
             dropout=0.0,  # Start with no dropout
             activation='gelu',
@@ -93,7 +95,7 @@ class MAE(nn.Module):
         # Simpler Decoder
         decoder_layer = nn.TransformerEncoderLayer(
             d_model=decoder_dim,
-            nhead=8,
+            nhead=decoder_heads,
             dim_feedforward=decoder_dim * 4,
             dropout=0.0,
             activation='gelu',
@@ -171,16 +173,37 @@ class MAE(nn.Module):
         return pred, mask
 
     def loss(self, pred, target, mask):
-        """Simple MSE loss on masked patches"""
         target_patches = patchify(target, self.patch_size)
-        loss = (pred - target_patches) ** 2
-        loss = loss.mean(dim=-1)  # Average over patch dimension
-        loss = (loss * mask).sum() / mask.sum()  # Only masked patches
+        
+        # Normalize patches to improve training stability
+        target_mean = target_patches.mean(dim=-1, keepdim=True)
+        target_std = target_patches.std(dim=-1, keepdim=True) + 1e-6
+        target_norm = (target_patches - target_mean) / target_std
+        
+        pred_mean = pred.mean(dim=-1, keepdim=True)
+        pred_std = pred.std(dim=-1, keepdim=True) + 1e-6
+        pred_norm = (pred - pred_mean) / pred_std
+        
+        loss = (pred_norm - target_norm) ** 2
+        loss = loss.mean(dim=-1)
+        loss = (loss * mask).sum() / mask.sum()
         return loss
 
     def reconstruct(self, pred):
         """Convert predictions back to image format"""
         return unpatchify(pred, self.patch_size, self.img_size)
+
+def validate(model, dataloader, device):
+    model.eval()
+    total_loss = 0
+    with torch.no_grad():
+        for imgs in dataloader:
+            imgs = imgs.to(device)
+            pred, mask = model(imgs)
+            loss = model.loss(pred, imgs, mask)
+            total_loss += loss.item()
+    return total_loss / len(dataloader)
+
 
 def train_one_epoch(model, dataloader, optimizer, device, epoch, verbose=True):
     model.train()
@@ -210,10 +233,10 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, verbose=True):
         if batch_idx < 3 or batch_idx % 20 == 0:
             print(f"  Batch {batch_idx + 1}/{num_batches}")
             print(f"    Loss: {batch_loss:.4f}")
-            print(f"    Grad norm: {total_norm:.4f}")
-            print(f"    Mask ratio actual: {mask.mean().item():.3f}")
-            print(f"    Pred range: [{pred.min().item():.3f}, {pred.max().item():.3f}]")
-            print(f"    Target range: [{imgs.min().item():.3f}, {imgs.max().item():.3f}]")
+            # print(f"    Grad norm: {total_norm:.4f}")
+            # print(f"    Mask ratio actual: {mask.mean().item():.3f}")
+            # print(f"    Pred range: [{pred.min().item():.3f}, {pred.max().item():.3f}]")
+            # print(f"    Target range: [{imgs.min().item():.3f}, {imgs.max().item():.3f}]")
             
         # Save reconstruction sample for first batch of first epoch
         if batch_idx == 0:
@@ -222,63 +245,92 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, verbose=True):
     return total_loss / num_batches
 
 def save_reconstruction_sample(model, imgs, pred, mask, filename):
-    """Save a sample reconstruction for visualization"""
     model.eval()
     with torch.no_grad():
-        # Take first image from batch
-        img = imgs[0:1]  # Keep batch dimension
-        
-        # Reconstruct
+        img = imgs[0:1]
         reconstructed = model.reconstruct(pred[0:1])
         
-        # Convert to numpy and denormalize
+        # Create masked version
+        masked_img = img.clone()
+        
+        # Dynamically calculate patch grid size
+        num_patches = mask.shape[1]  # Should be 256 for 256x256 images
+        patches_per_side = int(num_patches ** 0.5)  # sqrt(256) = 16
+        patch_size = model.patch_size  # Should be 16
+        
+        # Reshape mask to 2D grid
+        mask_2d = mask[0].reshape(patches_per_side, patches_per_side)
+        
+        # Apply mask to image
+        for i in range(patches_per_side):
+            for j in range(patches_per_side):
+                if mask_2d[i, j] == 1:  # Masked patch
+                    start_h = i * patch_size
+                    start_w = j * patch_size
+                    end_h = start_h + patch_size
+                    end_w = start_w + patch_size
+                    
+                    # Set masked patches to gray (0.5)
+                    masked_img[0, :, start_h:end_h, start_w:end_w] = 0.5
+        
+        # Convert to numpy and transpose for visualization
         original = img[0].cpu().permute(1, 2, 0).numpy()
+        masked = masked_img[0].cpu().permute(1, 2, 0).numpy()
         recon = reconstructed[0].cpu().permute(1, 2, 0).numpy()
         
-        # Clip to valid range
+        # Clip to valid range [0, 1]
         original = np.clip(original, 0, 1)
+        masked = np.clip(masked, 0, 1)
         recon = np.clip(recon, 0, 1)
         
-        # Create visualization
-        fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+        # Create 3-panel visualization
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        
         axes[0].imshow(original)
-        axes[0].set_title('Original')
+        axes[0].set_title('Original', fontsize=14)
         axes[0].axis('off')
         
-        axes[1].imshow(recon)
-        axes[1].set_title('Reconstructed')
+        axes[1].imshow(masked)
+        axes[1].set_title(f'Masked Input ({model.mask_ratio:.1%} masked)', fontsize=14)
         axes[1].axis('off')
+        
+        axes[2].imshow(recon)
+        axes[2].set_title('Reconstructed', fontsize=14)
+        axes[2].axis('off')
         
         plt.tight_layout()
         plt.savefig(filename, dpi=150, bbox_inches='tight')
         plt.close()
-        print(f"Saved reconstruction sample: {filename}")
-
+        
+        print(f"Saved reconstruction sample to {filename}")
+        print(f"Patch grid: {patches_per_side}x{patches_per_side}, Patch size: {patch_size}x{patch_size}")
+        print(f"Masked patches: {mask[0].sum().item()}/{num_patches} ({mask[0].sum().item()/num_patches:.1%})")
 # Training setup with debugging
 # Training setup with debugging
 def main(resume_from_checkpoint=None):
     # Smaller model for debugging
+    total_epochs = 500
     model = MAE(
-        img_size=128,
+        img_size=256,
         patch_size=16,
-        encoder_dim=256,  # Much smaller
-        decoder_dim=128,
-        encoder_depth=4,
-        decoder_depth=2,
-        num_heads=8,
-        mask_ratio=0.75
+        encoder_dim=1024,  # Much smaller
+        decoder_dim=512,
+        encoder_depth=16,
+        decoder_depth=8,
+        encoder_heads=16,
+        decoder_heads=8,
+        mask_ratio=0.6
     )
 
     # Load your data
-    from src.data import get_clean_ffhq_dataloaders
-    train_loader, test_loader = get_clean_ffhq_dataloaders(
-        "/home/hice1/avarma49/scratch/ffhq-128/",
+    train_loader, test_loader = get_clean_ffhq_dataloaders_unnormalized(
+        "/home/hice1/avarma49/scratch/ffhq-256/",
         batch_size=32  # Smaller batch size
     )
 
-    # Optimizer with very conservative settings
-    optimizer = AdamW(model.parameters(), lr=5e-5, weight_decay=0.01)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.8)
+    optimizer = AdamW(model.parameters(), lr=5e-4, weight_decay=0.05)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_epochs)
+
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
@@ -286,6 +338,7 @@ def main(resume_from_checkpoint=None):
     # Resume from checkpoint if provided
     start_epoch = 0
     losses = []
+    val_losses = []
 
     if resume_from_checkpoint:
         print(f"Resuming from checkpoint: {resume_from_checkpoint}")
@@ -307,7 +360,6 @@ def main(resume_from_checkpoint=None):
     print(f"Model parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
     print(f"Training on {device}")
 
-    total_epochs = 100  # Changed from 20 to 50
     epochs_to_run = total_epochs - start_epoch
 
     for epoch in range(start_epoch, total_epochs):
@@ -315,14 +367,19 @@ def main(resume_from_checkpoint=None):
         print(f"Learning rate: {optimizer.param_groups[0]['lr']:.2e}")
 
         loss = train_one_epoch(model, train_loader, optimizer, device, epoch, verbose=True)
+
+        val_loss = validate(model, test_loader, device)
+
         scheduler.step()
 
-        print(f"Epoch {epoch + 1} Average Loss: {loss:.4f}")
+        print(f"Epoch {epoch + 1} - Train Loss: {loss:.4f}, Val Loss: {val_loss:.4f}")
+
         losses.append(loss)
+        val_losses.append(val_loss)
 
         # Save progress
         with open("debug_losses.json", "w") as f:
-            json.dump(losses, f, indent=2)
+            json.dump({"train": losses, "val": val_losses}, f, indent=2)
 
         # Save checkpoint every 5 epochs
         if (epoch + 1) % 5 == 0:
@@ -337,4 +394,5 @@ def main(resume_from_checkpoint=None):
 
 
 if __name__ == "__main__":
-    model, losses = main(resume_from_checkpoint="/home/hice1/avarma49/scratch/checkpoints/debug_checkpoint_epoch_50.pt")
+    model, losses = main()
+    
